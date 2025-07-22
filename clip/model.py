@@ -230,13 +230,36 @@ class VisionTransformer(nn.Module):
 
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
+        print("x shape after transformer:", x.shape)
         x = x.permute(1, 0, 2)  # LND -> NLD
+        print("x shape after permute:", x.shape)
 
         x = self.ln_post(x[:, 0, :])
+        print("x shape after ln_post:", x.shape)
 
         if self.proj is not None:
             x = x @ self.proj
+        print("x shape after projection:", x.shape)
 
+        return x
+    
+    def forward_features(self, x: torch.Tensor):
+        """
+        Forward pass to get the features from the image.
+        This is a separate method to allow for feature extraction without the final projection.
+        """
+        x = self.conv1(x)
+        x = x.reshape(x.shape[0], x.shape[1], -1)
+        x = x.permute(0, 2, 1)
+        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
+        x = x + self.positional_embedding.to(x.dtype)
+        x = self.ln_pre(x)
+        x = x.permute(1, 0, 2)
+        x = self.transformer(x)
+        x = x.permute(1, 0, 2)
+        x = self.ln_post(x) # shape = [batch_size, grid ** 2 + 1, width]
+        if self.proj is not None:
+            x = x @ self.proj # shape = [batch_size, output_dim]
         return x
 
 
@@ -337,7 +360,9 @@ class CLIP(nn.Module):
     def dtype(self):
         return self.visual.conv1.weight.dtype
 
-    def encode_image(self, image):
+    def encode_image(self, image, dense_features: bool = False):
+        if dense_features:
+            return self.visual.forward_features(image.type(self.dtype))
         return self.visual(image.type(self.dtype))
 
     def encode_text(self, text):
